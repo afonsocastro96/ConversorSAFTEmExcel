@@ -1,0 +1,10 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# PyInstaller build output (generate_exe.py)
+/build/
+/dist/
+/Conversor SAFT em Excel.exe
+/Conversor SAFT em Excel.spec
