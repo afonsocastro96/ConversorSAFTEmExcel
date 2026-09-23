@@ -39,17 +39,24 @@ Design notes:
   though almost everything else in the schema that technically allows
   repetition never does in practice. Rather than a separate lookup sheet or
   numbered columns, repeated occurrences are concatenated into one cell.
-- Three sheets describe the file as a whole rather than a list of records --
-  Header (the SAF-T Header block), Totals (the file's own declared totals,
-  one section per MasterFiles/SourceDocuments/GeneralLedgerEntries wrapper --
-  including MasterFiles/GeneralLedgerAccounts's own TaxonomyReference, which
-  isn't a total/count like its five siblings but sits in the same
-  "field(s) before the record list" position), and Journals (ID +
-  description) -- each laid out vertically, one row per
-  field/entry, since e.g. Header's ~30 fields read far worse as one wide
-  row than as a two-column Field/Value table. See _KeyValueSheetBuilder and
-  populate_header_sheet()/populate_totals_sheet()/populate_journals_sheet().
-  All three share one tab colour and sit first in the workbook.
+- Four sheets describe the file/workbook as a whole rather than a list of
+  records -- Estrutura (a static legend explaining what every other sheet
+  contains and where it comes from, transcribed from Estrutura.xlsx (the
+  reference sheet this was authored from, not included in this repo); see
+  ESTRUTURA_ROWS/populate_estrutura_sheet()), Header (the SAF-T Header
+  block), Totals (the file's own declared totals, one section per
+  MasterFiles/SourceDocuments/GeneralLedgerEntries wrapper -- including
+  MasterFiles/GeneralLedgerAccounts's own TaxonomyReference, which isn't a
+  total/count like its five siblings but sits in the same "field(s) before
+  the record list" position), and Journals (ID + description) -- the latter
+  three laid out vertically, one row per field/entry, since e.g. Header's
+  ~30 fields read far worse as one wide row than as a two-column Field/Value
+  table. See _KeyValueSheetBuilder and populate_header_sheet()/
+  populate_totals_sheet()/populate_journals_sheet(). All four share one tab
+  colour and sit first in the workbook, Estrutura ahead of the other three.
+  Estrutura also has its own screen+print gridlines turned off and every row/
+  column past its own content hidden (see populate_estrutura_sheet()),
+  unlike every other sheet in this workbook.
 - Every sheet has a bold header row, left-aligned cells throughout, and a
   fixed font (Calibri 10pt, chosen for being both easy to read and a
   standard Windows/Office font). A column whose name marks it as a count, a
@@ -289,6 +296,13 @@ class Formats:
         self.decimal = workbook.add_format({**base, "num_format": FORMAT_DECIMAL})
         self.date = workbook.add_format({**base, "num_format": FORMAT_DATE})
         self.datetime = workbook.add_format({**base, "num_format": FORMAT_DATETIME})
+        # The Estrutura sheet's header row (see populate_estrutura_sheet) --
+        # "pattern": 1 is a solid fill, whose *visible* colour is fg_color,
+        # not bg_color (an OOXML quirk: bg_color only matters for non-solid
+        # patterns) -- confirmed against Estrutura.xlsx's own header cells.
+        self.estrutura_header = workbook.add_format(
+            {**base, "bold": True, "pattern": 1, "fg_color": "#D9D9D9"}
+        )
 
 
 def _cell_value_and_format(header: str, text: str, formats: Formats):
@@ -342,7 +356,8 @@ _COLOR_LIGHT_GREY = "#D8D8D8"
 
 # Header isn't named individually in the user's colour scheme -- blue, same
 # as the rest of the "describes the file as a whole" content it now holds
-# (the SAF-T Header block, the file's declared Totals, and the Journal list).
+# (the workbook's own Estrutura legend, the SAF-T Header block, the file's
+# declared Totals, and the Journal list).
 SHEET_TAB_COLORS = {
     "Header": _COLOR_BLUE,
     "GeneralLedgerAccounts": _COLOR_GREEN,
@@ -655,6 +670,146 @@ _TOTALS_SECTION_ORDER = [
 ]
 
 
+# --- Estrutura sheet (workbook legend) --------------------------------------
+# Transcribed from Estrutura.xlsx -- the reference sheet this was authored
+# from (not included in this repo) describing what each generated sheet
+# contains and which SAF-T section(s) it's sourced from. A
+# 1-tuple is a bold section header (e.g. "1. Informação geral"); a 4-tuple is
+# a data row: (Folha, Conteúdo, "SAF-T onde consta", Descrição).
+#
+# One correction from the source workbook: its last row names the sheet
+# "PaymentsLines" (with an s after Payment), but the sheet this script
+# actually writes is "PaymentLines" (see HEADERS_PAYMENT_LINES/SHEET_TAB_
+# COLORS) -- fixed here since a legend that misnames the sheet it's
+# describing would mislead more than it helps.
+ESTRUTURA_ROWS: list[tuple[str, ...]] = [
+    ("1. Informação geral",),
+    ("Header", "Cabeçalho", "Ambos", "Informação geral alusiva à Entidade a que respeita o SAF-T."),
+    ("Totals", "Totais", "Ambos", "Informação sobre todos os totalizadores constantes no SAF-T."),
+    ("Journals", "Diários", "Contabilidade", "Informação sobre os diários da contabilidade."),
+    ("2. Tabelas mestres",),
+    (
+        "GeneralLedgerAccounts", "Tabela de código de contas", "Contabilidade",
+        "Tabela com o código de contas previsto pelo SNC. Atua como balancete analítico.",
+    ),
+    ("Customers", "Tabela de clientes", "Ambos", "Informação do ficheiro de clientes da Entidade."),
+    ("Suppliers", "Tabela de fornecedores", "Faturação", "Informação do ficheiro de fornecedores da Entidade."),
+    (
+        "Product", "Tabela de produtos/serviços", "Faturação",
+        "Informação com o catálogo de produtos e tipos de serviços prestados que foram objeto de movimentação.",
+    ),
+    (
+        "TaxTable", "Tabela de impostos", "Ambos",
+        "Informação com os registos fiscais de IVA e as rúbricas de imposto de selo a liquidar.",
+    ),
+    ("3. Movimentos contabilísticos",),
+    (
+        "Transactions", "Lançamentos contabilísticos", "Contabilidade",
+        "Lançamentos contabilísticos correspondentes ao período de exportação. Atua em conjunto com a "
+        "tabela MovementLines como extrato.",
+    ),
+    (
+        "MovementLines", "Linhas dos lançamentos contabilísticos", "Contabilidade",
+        "Linhas dos lançamentos constantes na tabela Transactions. Atua em conjunto com esta como extrato.",
+    ),
+    ("4. Documentos comerciais",),
+    (
+        "Invoices", "Documentos comerciais a clientes", "Faturação",
+        "Documentos de venda e retificativos emitidos pela Entidade, como faturas e notas de crédito.",
+    ),
+    (
+        "InvoiceLines", "Linhas dos documentos comerciais", "Faturação",
+        "Linhas dos documentos listados na tabela Invoices.",
+    ),
+    (
+        "StockMovements", "Documentos de movimentação de mercadorias", "Faturação",
+        "Guias de transporte ou de remessa que sirvam de documento de transporte.",
+    ),
+    (
+        "StockMovementsLines", "Linhas dos documentos de movimentação", "Faturação",
+        "Linhas dos documentos listados na tabela StockMovements.",
+    ),
+    (
+        "WorkDocuments", "Documentos de conferência", "Faturação",
+        "Documentos apresentados ao cliente para conferência de mercadorias ou prestação de serviços.",
+    ),
+    (
+        "WorkDocumentsLines", "Linhas dos documentos de conferência", "Faturação",
+        "Linhas dos documentos listados na tabela WorkDocuments.",
+    ),
+    ("Payments", "Documentos de recibos emitidos", "Ambos", "Recibos emitidos."),
+    (
+        "PaymentLines", "Linhas dos documentos de pagamento", "Ambos",
+        "Linhas dos documentos listados na tabela Payment.",
+    ),
+]
+
+# Character-width column widths A-F, matching Estrutura.xlsx's own layout --
+# A and F are narrow margin columns, E is wide enough to fit the longest
+# Descrição on one line without wrapping.
+_ESTRUTURA_COLUMN_WIDTHS = [0.6, 19.4, 35.46, 14.4, 100.4, 0.93]
+_ESTRUTURA_HEADER_LABELS = ("Folha", "Conteúdo", "SAF-T onde consta", "Descrição")
+# Blank spacer row below the last data row, matching Estrutura.xlsx's own
+# compact row height there (its other rows are left at Excel's default
+# height). The source workbook also has one above the header row, but that's
+# deliberately dropped here -- the header starts at row 1 instead.
+_ESTRUTURA_BOTTOM_SPACER_HEIGHT = 5.75
+# 1-based Excel row: every row below this is hidden (see populate_estrutura_
+# sheet's use of set_default_row(hide_unused_rows=True)).
+_ESTRUTURA_LAST_VISIBLE_ROW = 24
+
+
+def populate_estrutura_sheet(worksheet, formats: Formats) -> None:
+    """Fills the Estrutura sheet: a static legend (not derived from the SAF-T
+    being converted) describing what each of this workbook's other sheets
+    contains. See ESTRUTURA_ROWS for the content and where it comes from.
+    """
+    worksheet.hide_gridlines(2)  # off on screen and when printing
+    for col, width in enumerate(_ESTRUTURA_COLUMN_WIDTHS):
+        worksheet.set_column(col, col, width)
+    # Columns after F: hidden in one call, native to set_column -- no need
+    # for the per-row workaround below.
+    worksheet.set_column(6, 16383, None, None, {"hidden": True})
+
+    row = 0  # Excel row 1: the header row
+    # The grey fill spans the full A:F width, including the narrow A/F margin
+    # columns either side of the labelled B:E ones -- written as blank cells
+    # rather than left untouched so the fill still shows on those columns.
+    worksheet.write_blank(row, 0, None, formats.estrutura_header)
+    for col, label in enumerate(_ESTRUTURA_HEADER_LABELS):
+        worksheet.write(row, 1 + col, label, formats.estrutura_header)
+    worksheet.write_blank(row, 5, None, formats.estrutura_header)
+    row += 1
+
+    for item in ESTRUTURA_ROWS:
+        if len(item) == 1:
+            worksheet.write(row, 1, item[0], formats.bold)
+        else:
+            for col, text in enumerate(item):
+                worksheet.write(row, 1 + col, text, formats.text)
+        row += 1
+
+    # One more blank row stays visible below the data, matching the source
+    # workbook's own padding, before everything from _ESTRUTURA_LAST_VISIBLE_
+    # ROW onward gets hidden. Also gets a blank written cell, not just
+    # set_row(): in constant_memory mode a row's properties are only ever
+    # flushed to the file when some later write() call passes through it (see
+    # worksheet.py's _write_single_row) -- a set_row() with no write() to
+    # that row, or to a row after it, is silently dropped rather than shown
+    # with default formatting. write_blank() gives this row that later
+    # write() to hang the flush on.
+    worksheet.set_row(row, _ESTRUTURA_BOTTOM_SPACER_HEIGHT)
+    worksheet.write_blank(row, 1, None, formats.text)
+    assert row + 1 == _ESTRUTURA_LAST_VISIBLE_ROW, "content grew past the sheet's hidden-row cutoff"
+
+    # Rows past _ESTRUTURA_LAST_VISIBLE_ROW are hidden by leaving them
+    # untouched: hide_unused_rows zeroes the height of any row that was never
+    # written to or explicitly set_row()'d, which is one worksheet-level flag
+    # rather than an explicit set_row(..., hidden=True) call for each of the
+    # ~1,048,550 rows that would otherwise need it.
+    worksheet.set_default_row(hide_unused_rows=True)
+
+
 class _KeyValueSheetBuilder:
     """Shared builder for the three small vertical Field/Value-style sheets
     that describe the file as a whole (Header, Totals, Journals) rather
@@ -887,12 +1042,20 @@ def convert(saft_path: str, output_path: str) -> None:
     workbook = xlsxwriter.Workbook(output_path, {"constant_memory": True})
     formats = Formats(workbook)
 
+    # The workbook legend, sitting even before Header -- it explains what
+    # every other sheet is before the reader gets to them. Static content
+    # (see ESTRUTURA_ROWS), so unlike Header/Totals/Journals below it's
+    # filled in immediately rather than deferred to the end of convert().
+    header_color = SHEET_TAB_COLORS["Header"]
+    estrutura_sheet = workbook.add_worksheet("Estrutura")
+    estrutura_sheet.set_tab_color(header_color)
+    populate_estrutura_sheet(estrutura_sheet, formats)
+
     # Created now, before the main parsing loop, so they sit first in the
     # workbook -- but not populated until the very end, once the loop has
     # gathered their data (header_row/declared_totals/journals). xlsxwriter
     # worksheets can be written to in any order relative to each other, so
     # this needs no equivalent of openpyxl's move_sheet() workaround.
-    header_color = SHEET_TAB_COLORS["Header"]
     header_builder = _KeyValueSheetBuilder(workbook, "Header", formats, header_color)
     totals_builder = _KeyValueSheetBuilder(workbook, "Totals", formats, header_color)
     journals_builder = _KeyValueSheetBuilder(workbook, "Journals", formats, header_color)

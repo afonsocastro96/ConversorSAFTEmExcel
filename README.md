@@ -43,10 +43,11 @@ requiring nothing but Windows to run — no Python install needed on the target 
 
 ## What's in the workbook
 
-Every run produces 18 sheets, in this order:
+Every run produces 19 sheets, in this order:
 
 | Sheet | Contents |
 |---|---|
+| Estrutura | A static legend explaining what every other sheet contains and which SAF-T section it comes from |
 | Header | The SAF-T `Header` block (company/file metadata), one field per row |
 | Totals | The file's own declared totals and checksums — `GeneralLedgerAccounts`' `TaxonomyReference`, and each of `GeneralLedgerEntries`/`SalesInvoices`/`MovementOfGoods`/`WorkingDocuments`/`Payments`' `NumberOfEntries`/`TotalDebit`/`TotalCredit`/etc. |
 | Journals | Every `Journal`'s ID and description |
@@ -67,7 +68,11 @@ Every run produces 18 sheets, in this order:
 | PaymentLines | Payment line items |
 
 A file with no `SourceDocuments` data (a common export shape for accounting-only SAF-Ts) still
-gets all 18 sheets — the document-related ones are simply empty except for their header row.
+gets all 19 sheets — the document-related ones are simply empty except for their header row.
+
+Estrutura is the exception to most of the above: its content is fixed (not derived from the SAF-T
+being converted), its header row has a grey fill instead of a plain bold one, its gridlines are
+turned off, and every row/column past its own content is hidden.
 
 Nested single-occurrence blocks (an address, a document's status, a tax breakdown, ...) are
 flattened onto the parent record's row as prefixed columns (e.g. `BillingAddress_City`). Elements
