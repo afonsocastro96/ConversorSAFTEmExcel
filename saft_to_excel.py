@@ -52,8 +52,9 @@ Design notes:
   three laid out vertically, one row per field/entry, since e.g. Header's
   ~30 fields read far worse as one wide row than as a two-column Field/Value
   table. See _KeyValueSheetBuilder and populate_header_sheet()/
-  populate_totals_sheet()/populate_journals_sheet(). All four share one tab
-  colour and sit first in the workbook, Estrutura ahead of the other three.
+  populate_totals_sheet()/populate_journals_sheet(). All four sit first in
+  the workbook, Estrutura ahead of the other three; the three share one tab
+  colour, while Estrutura's tab is black to set the legend apart.
   Estrutura also has its own screen+print gridlines turned off and every row/
   column past its own content hidden (see populate_estrutura_sheet()),
   unlike every other sheet in this workbook.
@@ -353,6 +354,9 @@ _COLOR_ORANGE = "#FBD5B5"
 _COLOR_TAN = "#C4BD97"
 _COLOR_PURPLE = "#CCC1D9"
 _COLOR_LIGHT_GREY = "#D8D8D8"
+# Estrutura only -- the legend sheet is set apart from the Header group it
+# otherwise sits with, so the reader sees it as "about the workbook", not data.
+_COLOR_BLACK = "#000000"
 
 # Header isn't named individually in the user's colour scheme -- blue, same
 # as the rest of the "describes the file as a whole" content it now holds
@@ -1046,9 +1050,8 @@ def convert(saft_path: str, output_path: str) -> None:
     # every other sheet is before the reader gets to them. Static content
     # (see ESTRUTURA_ROWS), so unlike Header/Totals/Journals below it's
     # filled in immediately rather than deferred to the end of convert().
-    header_color = SHEET_TAB_COLORS["Header"]
     estrutura_sheet = workbook.add_worksheet("Estrutura")
-    estrutura_sheet.set_tab_color(header_color)
+    estrutura_sheet.set_tab_color(_COLOR_BLACK)
     populate_estrutura_sheet(estrutura_sheet, formats)
 
     # Created now, before the main parsing loop, so they sit first in the
@@ -1056,6 +1059,7 @@ def convert(saft_path: str, output_path: str) -> None:
     # gathered their data (header_row/declared_totals/journals). xlsxwriter
     # worksheets can be written to in any order relative to each other, so
     # this needs no equivalent of openpyxl's move_sheet() workaround.
+    header_color = SHEET_TAB_COLORS["Header"]
     header_builder = _KeyValueSheetBuilder(workbook, "Header", formats, header_color)
     totals_builder = _KeyValueSheetBuilder(workbook, "Totals", formats, header_color)
     journals_builder = _KeyValueSheetBuilder(workbook, "Journals", formats, header_color)
