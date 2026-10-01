@@ -3,13 +3,15 @@
 A standalone tool that converts a Portuguese SAF-T (Standard Audit File for Tax) XML export into
 a single Excel workbook, one sheet per SAF-T section and one row per record.
 
-![Conversor SAF-T → Excel](https://i.imgur.com/ZCKkq7z.png)
+![Conversor SAF-T → Excel](conversor.png)
 
 ## Contents
 
 - `saft_to_excel.py` — the converter itself (also runnable as a CLI).
 - `saft_to_excel_gui_tk.py` — a small desktop GUI (tkinter/ttk) wrapping the converter.
 - `generate_exe.py` — builds a standalone Windows `.exe` of the GUI via PyInstaller.
+- `icon.ico` — the `.exe`'s file icon; `conversor.png` — the screenshot above.
+- `requirements.txt` — what the three scripts need.
 
 ## Usage
 
@@ -38,8 +40,9 @@ generated workbook automatically once it's done.
 python generate_exe.py
 ```
 
-Builds a onefile, windowed `.exe` (no console window) named `Conversor SAFT em Excel.exe`,
-requiring nothing but Windows to run — no Python install needed on the target machine.
+Builds a onefile, windowed `.exe` (no console window) named `Conversor SAFT em Excel.exe`, next to
+the scripts, requiring nothing but Windows to run — no Python install needed on the target
+machine. PyInstaller's own working files go to `build/` and `dist/` (both git-ignored).
 
 ## What's in the workbook
 

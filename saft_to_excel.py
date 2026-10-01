@@ -15,8 +15,9 @@ Design notes:
   working regardless of schema version.
 - Streaming: some real Portuguese SAF-T exports run to hundreds of MB. The
   XML is read with lxml.etree.iterparse, clearing each top-level record
-  element right after it is written so memory stays bounded by one
-  record's own subtree rather than the whole file. The workbook is written
+  element right after it is written and detaching the already-written
+  records before it, so memory stays bounded by one record's own subtree
+  rather than the whole file. The workbook is written
   with xlsxwriter in "constant_memory" mode -- streams each worksheet to
   disk as rows are written rather than holding it in memory, the same idea
   as openpyxl's write_only mode this script used before (see git history);
@@ -183,7 +184,14 @@ def local_name(tag) -> str | None:
 # it's left as the more readable expanded-columns form (see module
 # docstring: an unexpected second occurrence there is caught by
 # SheetWriter's unknown-field warning rather than silently mis-shaped).
-ALWAYS_CONCATENATE_TAGS = {"OrderReferences", "References", "ProductSerialNumber"}
+#
+# A document's DocumentTotals/Payment (how the document was paid) belongs
+# here too: most documents have none or one, but a real client file
+# had 48 invoices with two or three -- each with its own mechanism, amount
+# and date -- so it's one "DocumentTotals_Payment" text cell, e.g.
+# "OU: 5452.79: 2022-01-13 | OU: 389.77: 2022-05-25". No other SAF-T record
+# has a child element named Payment, so this doesn't affect anything else.
+ALWAYS_CONCATENATE_TAGS = {"OrderReferences", "References", "ProductSerialNumber", "Payment"}
 
 
 def flatten_record(element, skip_tags: frozenset[str] = frozenset()) -> dict[str, str]:
@@ -253,9 +261,10 @@ _INTEGER_COLUMNS = {
 # Substrings in a column name meaning "a decimal number, 2 decimal places,
 # no currency symbol" -- covers monetary amounts, quantities, tax
 # percentages and exchange rates alike, per the user's two-bucket
-# formatting request. Matched as a substring, not a suffix, since several
-# real column names carry the keyword in the middle rather than at the end
-# (Totals-sheet fields like TotalDebit/TotalCredit/TotalQuantityIssued).
+# formatting request. Matched as a substring of the field name, not a
+# suffix, since several real field names carry the keyword in the middle
+# rather than at the end (Totals-sheet fields like TotalDebit/TotalCredit/
+# TotalQuantityIssued).
 _DECIMAL_KEYWORDS = (
     "Amount", "Total", "Payable", "Balance", "Price", "Percentage",
     "Quantity", "ExchangeRate", "Debit", "Credit",
@@ -270,12 +279,23 @@ def _column_kind(header: str) -> str:
     'integer', 'decimal', 'date_like' (a date or a datetime -- decided per
     value at write time, since the same column family, e.g. *StatusDate,
     holds either depending on the record), or 'text' (left alone).
+
+    Only the column's own field name -- the part after its last "_" -- is
+    looked at, never the parent-group prefix flatten_record() put in front
+    of it: every DocumentTotals_* column contains "Total", which would
+    otherwise make e.g. DocumentTotals_Settlement_SettlementDate a
+    "decimal" column (so never typed as a date). SAF-T element names never
+    contain "_" themselves, so the last segment is always a real field name.
+
+    A column's kind never changes, so SheetWriter works it out once per
+    column rather than once per cell (see _typed_value).
     """
-    if header in _INTEGER_COLUMNS:
+    field = header.rpartition("_")[2]
+    if field in _INTEGER_COLUMNS:
         return "integer"
-    if any(keyword in header for keyword in _DECIMAL_KEYWORDS):
+    if any(keyword in field for keyword in _DECIMAL_KEYWORDS):
         return "decimal"
-    if "Date" in header:
+    if "Date" in field:
         return "date_like"
     return "text"
 
@@ -313,11 +333,16 @@ def _cell_value_and_format(header: str, text: str, formats: Formats):
     doesn't fit its column's expected shape is just left as text rather
     than dropped or crashing the run.
     """
-    text = text or ""
+    return _typed_value(_column_kind(header), text, formats)
+
+
+def _typed_value(kind: str, text: str, formats: Formats):
+    """_cell_value_and_format for a column whose _column_kind() is already
+    known -- the per-cell hot path for SheetWriter.append().
+    """
     if not text:
         return None, formats.text
 
-    kind = _column_kind(header)
     if kind == "integer":
         try:
             return int(float(text)), formats.integer
@@ -428,6 +453,7 @@ class SheetWriter:
         self._base_title = base_title
         self._headers = headers
         self._header_set = set(headers)
+        self._column_kinds = [_column_kind(header) for header in headers]
         self._formats = formats
         self._tab_color = tab_color
         self._sheets = []
@@ -464,7 +490,7 @@ class SheetWriter:
             print(
                 f"WARNING: sheet '{self._base_title}' has a value for "
                 f"'{field}', which isn't one of its known columns -- add it "
-                "to the header list in tools/saft_to_excel.py if this "
+                "to the header list in saft_to_excel.py if this "
                 "matters. Value dropped for this and any further row.",
                 file=sys.stderr,
             )
@@ -474,17 +500,14 @@ class SheetWriter:
             self._start_new_sheet()
 
         sheet = self._sheets[-1]
-        for col, header in enumerate(self._headers):
+        for col, (header, kind) in enumerate(zip(self._headers, self._column_kinds)):
             text = row.get(header, "")
-            value, fmt = _cell_value_and_format(header, text, self._formats)
+            value, fmt = _typed_value(kind, text, self._formats)
             sheet.write(self._next_row, col, value, fmt)
+            if text:
+                self._column_max_len[col] = max(self._column_max_len[col], len(text))
         self._next_row += 1
         self._rows_in_current_sheet += 1
-
-        for i, header in enumerate(self._headers):
-            value = row.get(header, "")
-            if value:
-                self._column_max_len[i] = max(self._column_max_len[i], len(str(value)))
 
     def finalize_column_widths(self) -> None:
         """Applies the auto-fit widths computed from every row seen so far
@@ -551,6 +574,7 @@ HEADERS_SUPPLIERS = [
 
 HEADERS_PRODUCTS = [
     "ProductType", "ProductCode", "ProductGroup", "ProductDescription", "ProductNumberCode",
+    "CustomsDetails_CNCode", "CustomsDetails_UNNumber",
 ]
 
 HEADERS_TAX_TABLE = [
@@ -577,8 +601,10 @@ _SHIP_FIELDS = ["DeliveryID", "DeliveryDate", "WarehouseID", "LocationID", *_pre
 _DOCUMENT_TOTALS_FIELDS = [
     "TaxPayable", "NetTotal", "GrossTotal",
     "Currency_CurrencyCode", "Currency_CurrencyAmount", "Currency_ExchangeRate",
-    "Settlement_SettlementAmount", "Settlement_PaymentTerms",
-    "Payment_PaymentMechanism", "Payment_PaymentAmount", "Payment_PaymentDate",
+    "Settlement_SettlementDiscount", "Settlement_SettlementAmount",
+    "Settlement_SettlementDate", "Settlement_PaymentTerms",
+    # Every Payment block joined into one cell -- see ALWAYS_CONCATENATE_TAGS.
+    "Payment",
 ]
 
 HEADERS_INVOICES = [
@@ -1038,6 +1064,27 @@ def _report_integrity_check(declared_totals: dict[str, dict], integrity: Integri
             )
 
 
+def _detach_processed_siblings(record) -> None:
+    """Remove the already-processed records that sit just before `record`
+    (same tag, same parent) from the tree.
+
+    elem.clear() empties a record but leaves its now-empty node attached to
+    its parent until that parent itself ends -- for a wrapper like
+    SalesInvoices that's the whole section, so without this the tree keeps
+    one node per record ever seen and memory grows with the file's size.
+    Only same-tag siblings are removed: everything a later record still
+    needs from its parent (a Journal's JournalID, a wrapper's own summary
+    fields) is a different tag, and always comes before the records.
+    Removing *earlier* siblings, never the current element, is the pattern
+    lxml's documentation gives as safe to do during iterparse.
+    """
+    parent = record.getparent()
+    previous = record.getprevious()
+    while previous is not None and previous.tag == record.tag:
+        parent.remove(previous)
+        previous = record.getprevious()
+
+
 def _sheet(workbook: xlsxwriter.Workbook, title: str, headers: list[str], formats: Formats) -> SheetWriter:
     return SheetWriter(workbook, title, headers, formats, tab_color=SHEET_TAB_COLORS[title])
 
@@ -1095,6 +1142,11 @@ def convert(saft_path: str, output_path: str) -> None:
     declared_totals: dict[str, dict] = {}
     header_row: dict[str, str] = {}
     journals: list[dict] = []
+    # The Journal whose JournalID was last looked up, and that ID -- so a
+    # Journal's transactions share one lookup rather than each re-scanning
+    # the Journal's children for it (see the Transaction branch below).
+    current_journal = None
+    current_journal_id = ""
 
     context = etree.iterparse(saft_path, events=("end",), tag=tags_of_interest, recover=True)
     for _event, elem in context:
@@ -1134,7 +1186,11 @@ def convert(saft_path: str, output_path: str) -> None:
             sheets["TaxTable"].append(flatten_record(elem))
         elif tag == "Transaction":
             row = flatten_record(elem, skip_tags=frozenset({"Lines"}))
-            row["JournalID"] = _child_text(elem.getparent(), "JournalID")
+            journal = elem.getparent()
+            if journal is not current_journal:
+                current_journal = journal
+                current_journal_id = _child_text(journal, "JournalID")
+            row["JournalID"] = current_journal_id
             sheets["Transactions"].append(row)
             integrity.record("GeneralLedgerEntries")
             _append_movement_lines(
@@ -1176,14 +1232,17 @@ def convert(saft_path: str, output_path: str) -> None:
             section = TOTALS_WRAPPER_TAGS[tag]
             declared_totals[section] = totals_row(elem, section)
 
-        # Clear only this element's own subtree (never a sibling or an
-        # ancestor), so context still needed later -- a Journal's JournalID
-        # for the next Transaction, a wrapper's summary fields once all its
-        # records are done -- stays intact. This bounds memory to roughly
-        # one record's own subtree rather than the whole file, which is
-        # what matters for the ~1GB files this needs to handle, without the
-        # sibling-deletion trick that would risk deleting that context.
+        # Free this element's own subtree, then detach the already-cleared
+        # records before it (see _detach_processed_siblings) -- together
+        # these bound memory to roughly one record's own subtree rather than
+        # the whole file, which is what matters for the ~1GB files this
+        # needs to handle. Ancestors are never touched, so context still
+        # needed later -- a Journal's JournalID for the next Transaction, a
+        # wrapper's summary fields once all its records are done -- stays
+        # intact.
         elem.clear()
+        if expected_parent is not None:
+            _detach_processed_siblings(elem)
 
     _report_integrity_check(declared_totals, integrity)
 
